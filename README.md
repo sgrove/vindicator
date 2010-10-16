@@ -3,7 +3,7 @@ Node Crawler
 
 *"A fun toy"*
 
-Just a sample crawler to tell you if you have any dead links.
+Just a sample crawler to tell you if you have any dead links. Please keep in mind this is just an off-the-cuff project and not meant to represent any sort of good practices.
 
 TODO
 ------------------
