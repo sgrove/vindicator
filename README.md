@@ -29,6 +29,6 @@ Thanks
 [Veks][1] - For his node mastery and help
 
 
-  [1]: http://github.com/kevzettler
+  [1]: http://vekz.posterous.com/
 
 
