@@ -71,14 +71,22 @@ var operator = {
             }
         });
     },
-    crawlNext: function(cb) { if ((this.currentConnections < this.maxConnections)) {
+    hasFreeConnections: function() { if (this.currentConnections < this.maxConnections) { return true; } else { return false; } },
+    crawlNext: function(cb) { if (this.hasFreeConnections()) {
         //console.log("Crawling next...");
         var next = this.nextUrl()
         if (next) {
             this.crawl(next, cb);
         }
     }
-                            }
+                            },
+    canProceed: function() {
+        if (this.hasFreeConnections() && this.hasPendingUrls()) {
+            return true;
+        } else {
+            return false;
+        }
+    }
 };
 
 var startingUrl = process.argv[2];
@@ -86,9 +94,11 @@ operator.addUrl( startingUrl);
 
 while(true) {
     //console.log(operator);
-    operator.crawlNext(function() {
-        console.log("/------------------------------------------------------------\\");
-        console.log(operator.results);
-        console.log("\\------------------------------------------------------------/");
-    });
+    if (operator.canProceed()) {
+        operator.crawlNext(function() {
+            console.log("/------------------------------------------------------------\\");
+            console.log(operator.results);
+            console.log("\\------------------------------------------------------------/");
+        });
+    }
 }
