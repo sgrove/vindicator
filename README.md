@@ -26,7 +26,7 @@ TODO (In no order)
   
 Thanks
 ------
-[Veks][1] - For his node mastery and help
+[Vekz][1] - For his node mastery and help
 
 
   [1]: http://vekz.posterous.com/
