@@ -1,104 +1,141 @@
-var sys = require('sys')
-,http = require('http')
-,request = require('request')
-,jsdom = require('jsdom')
-,window = jsdom.jsdom().createWindow();
+require('./lib/extensions.js');
 
+var sys    = require('sys'),
+    http   = require('http'),
+    jsdom  = require('jsdom'),
+    window = jsdom.jsdom().createWindow(),
+    w3c = require('./lib/w3c.js'),
+    utils = require('./lib/utils.js');
 
-Array.prototype.include = function(needle) {
-    for (var i = 0; i < this.length; i++) {
-        if (needle == this[i]) {
-            true;
-        }
-    }
+var results = [],
+    visited = [],
+    pending = [],
+    urlsToValidate = [],
+    validations = [];
 
-    return false;
-}
+var chromeUserAgent = "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US) AppleWebKit/525.13 (KHTML, like Gecko) Chrome/0.X.Y.Z Safari/525.13.";
 
-String.prototype.startsWith = function(str) {
-    if (str == this.substring(0, str.length)) return true;
+var getAllLinks = function(body, url, cb) {
+    console.log(body);
+    //console.log("getAllLinks [" + url + "]: " + body);
 
-    return false;
-}
+    if (body == undefined || body == null || body.length < 1) return cb([]);
+    console.log("Body length: " + body.length);
 
-var results = []
-,visited = []
-,pending = [];
+    var window = jsdom.jsdom(body).createWindow(),
+        links = [];
 
+    jsdom.jQueryify(window, "lib/jquery-1.4.2.min.js", function (window, $) {
+                        $('a').each(function() {
+                                        var newUrl = $(this).attr("href");
 
-var operator = {
-    results: [],
-    visited: [],
-    pending: [],
-    currentConnections: 0,
-    maxConnections: 20,
-    addUrl: function(url) { if (!this.visited.include(url)) { console.log("Adding: " + url); this.pending.push(url); return true; } else { return false; } },
-    nextUrl: function() {
-        if (this.pending.length != 0) {
-            this.currentConnections += 1;
-            return this.pending.shift();
-        } else {
-            return false;
-        }
-    },
-    hasPendingUrls: function () { return !(this.pending.length == 0); },
-    logResult: function(url, status) { this.currentConnections = Math.max(0, this.currentConnections - 1); this.results.push([url, status]); this.visited.push(url); },
-    crawl: function(url, cb) {
-        //console.log("crawling: " + url);
-        var op = this;
-        request({uri:url}, function (error, response, body) {
-            op.logResult(url, response.statusCode);
+                                        if (newUrl.startsWith("mailto")) return;
+                                        if (newUrl.startsWith("/")) newUrl = newUrl.substring(1, newUrl.length);
+                                        if (!newUrl.startsWith("http")) newUrl = url.protocol + "://" + url.host + "/" + newUrl;
 
-            if (!error && response.statusCode == 200) {
-                var window = jsdom.jsdom(body).createWindow();
-                jsdom.jQueryify(window, "http://ajax.googleapis.com/ajax/libs/jquery/1.4.2/jquery.js", function (window, $) {
-                    $('a').each(function() {
-                        var newUrl = $(this).attr("href");
+                                        links.push(newUrl);
+                                    });
 
-                        if (newUrl.startsWith("//")) {
-                            newUrl = newUrl.substring(1, newUrl.length);
-                        }
-                        
-                        if (!newUrl.startsWith("http")) {
-                            var protocol = response.socket.https ? "https://" : "http://";
-                            newUrl = protocol + response.socket.host + "/" + newUrl;
-                        }
-
-                        op.addUrl(newUrl);
-                        cb();
+                        cb(links);
                     });
-                });
-            }
-        });
-    },
-    hasFreeConnections: function() { if (this.currentConnections < this.maxConnections) { return true; } else { return false; } },
-    crawlNext: function(cb) { if (this.hasFreeConnections()) {
-        //console.log("Crawling next...");
-        var next = this.nextUrl()
-        if (next) {
-            this.crawl(next, cb);
-        }
-    }
-                            },
-    canProceed: function() {
-        if (this.hasFreeConnections() && this.hasPendingUrls()) {
-            return true;
-        } else {
-            return false;
-        }
+};
+
+
+var getUrl = function(urlString, cb, level) {
+    level = level || 0;
+
+    var body     = "",
+        url      = utils.parseUrl(urlString),
+        debug    = JSON.stringify({body: body, url: url}),
+        debugBar = ""; // Just pretty debugging
+    
+    console.log("\tGetting url: " + sys.inspect(url));
+
+    for (var i = 0; i < debug.length + 2; i++) debugBar += "-"; 
+    
+    console.log("-" + debugBar + "\\");
+    console.log(" " + debug);
+    console.log("-" + debugBar + "/");
+
+    // Add https support laterz :P
+    if ("https" == url.protocol) cb(null);
+
+    // Only follow links from the same domain we started with
+    if (!url.host.endsWith(primaryDomain)) cb(null);
+
+    var site = http.createClient(url.port, url.host);
+    var request = site.request('GET', url.path, {'User-Agent': chromeUserAgent,
+                                                 'Host': url.host,
+                                                 'Accept': '*/*'});
+
+    request.on('response', function (response) {
+                   if ((302 == response.statusCode || 301 == response.statusCode) && level < 5) {
+                       console.log('REDIRECT: ' + response.headers.location);
+                       results.push({status: response.statusCode, body: "", valid: "unknown", url: url})
+                       return getUrl(response.headers.location, cb, level + 1);
+                   } else {
+                       response.setEncoding('utf8');
+                       response.on('data', function (chunk) {
+                                       //console.log('BODY: ' + chunk);
+                                       body += chunk;
+                                   });
+                       response.on('end', function() {
+                                       w3c.checkValidation(url, function(result) {
+                                                               //results.push({status: response.statusCode, body: body, validation: result, url: url})
+                                                               results.push({status: response.statusCode, validation: result, url: url})
+                                                               visited.push(urlString);
+                                                               getAllLinks(body, url, function(links) {
+                                                                               pending.concatUnique(links);
+                                                                               cb(body);
+                                                                           });
+                                                           });
+                                   });
+                   }
+               });
+
+         request.end();
+};
+
+console.log(pending);
+console.log("============================================================");
+
+var startingUrl = process.argv[2];
+
+var processUrl = function() {
+    console.log("Results: ");
+    console.log(results);
+    console.log("------------------------------------------------------------");
+
+    pending.each(function(url, index) {
+                     console.log("Checking through pending");
+                     if (!visited.include(url)) {
+                         getUrl(url, processUrl);
+                     }
+                 });
+};
+
+var pendingHandle,
+    resultsHandle,
+    primaryDomain = parseUrl(startingUrl).host;
+
+var consumePending = function() {
+    if (pending.length != 0) {
+        getUrl(pending.shift(), function(){});
+    } else {
+        clearInterval(pendingHandle);
+        clearInterval(resultsHandle);
+        console.log("Final results (should be html):");
+        console.log(results);
     }
 };
 
-var startingUrl = process.argv[2];
-operator.addUrl( startingUrl);
-
-while(true) {
-    //console.log(operator);
-    if (operator.canProceed()) {
-        operator.crawlNext(function() {
-            console.log("/------------------------------------------------------------\\");
-            console.log(operator.results);
-            console.log("\\------------------------------------------------------------/");
-        });
-    }
-}
+// Kickoff the crawling process
+getUrl(startingUrl, function() {
+           pendingHandle = setInterval(consumePending, 100);
+           resultsHandle = setInterval(function() {
+                                           console.log("------------------------------------------------------------");
+                                           console.log(results);
+                                           console.log(validations)
+                                       }, 4000);
+           validateHandle = setInterval(w3c.validatePending(results, validations), 1000);
+       });
